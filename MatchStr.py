@@ -35,7 +35,7 @@ class WordMatcher:
         max_values = [max(col) for col in zip(*self.match_matrix)]  # 获取每列的最大值
         for j, col_max_value in enumerate(max_values):  # 遍历每列的最大值
             for i, value in enumerate(self.match_matrix):
-                if value[j] == col_max_value:  # 如果当前值等于该列的最大值
+                if value[j] == col_max_value and col_max_value != 0:  # 如果当前值等于该列的最大值(最大值为0说明完全不匹配，不应置1)
                     value[j] = 1  # 将其设为1
                 else:
                     value[j] = 0  # 否则置为0
@@ -119,9 +119,12 @@ class FileReader():
                 files_not_match.append(old_filename_without_extension)
 
         # 打印将要改名的文件列表
-        print("未匹配到的文件列表：")
+        print("\033[33m" + "未匹配到的文件列表：")
         for i, old_filename in enumerate(files_not_match):
             print(f"{i}. {old_filename}")
+        print("\033[31m" + "可能被处理掉的正确对应：")
+        for idx, (i, j) in enumerate(word_matcher.zero_positions):
+            print("\033[31m" + f"{idx}.{word_matcher.list2[j]} \033[0m-x->\033[31m {word_matcher.list1[i]}" + "\033[0m")
         print("将要改名的文件列表：")
         for i, (old_filename, _, new_filename, _) in enumerate(files_to_rename):
             print(f"{i}. {old_filename} --> {new_filename}")
