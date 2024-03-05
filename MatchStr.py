@@ -1,6 +1,10 @@
 import re
 import os
-
+'''
+tudo:
+match_matrix的处理有些不合理，尤其是一行内有多个非零项取第一项的部分
+重命名大小写有问题
+'''
 class WordMatcher:
     '''
     list(字符串列表) --> word_list(单词集合的列表) --> match_matrix(映射矩阵)  --> match_map(映射列表)
@@ -35,7 +39,7 @@ class WordMatcher:
         max_values = [max(col) for col in zip(*self.match_matrix)]  # 获取每列的最大值
         for j, col_max_value in enumerate(max_values):  # 遍历每列的最大值
             for i, value in enumerate(self.match_matrix):
-                if value[j] == col_max_value:  # 如果当前值等于该列的最大值
+                if value[j] == col_max_value and col_max_value != 0:  # 如果当前值等于该列的最大值(最大值为0说明完全不匹配，不应置1)
                     value[j] = 1  # 将其设为1
                 else:
                     value[j] = 0  # 否则置为0
@@ -76,16 +80,16 @@ class FileReader():
         if recursive: # 包括对子文件夹的扫描
             for root, dirs, files in os.walk(self.folder_path):
                 for filename in files:
-                    filename = filename.lower()
+                    filename_lower = filename.lower()
                     for extension in file_extension:
-                        if filename.endswith(extension):
+                        if filename_lower.endswith(extension):
                             filenames.append(filename)
                             pathlist.append(os.path.join(root, filename))
         else: # 不包括子文件夹
             for filename in os.listdir(self.folder_path):
-                filename = filename.lower()
+                filename_lower = filename.lower()
                 for extension in file_extension:
-                    if filename.endswith(extension):
+                    if filename_lower.endswith(extension):
                         filenames.append(filename)
                         pathlist.append(os.path.join(self.folder_path, filename))
         
@@ -119,10 +123,13 @@ class FileReader():
                 files_not_match.append(old_filename_without_extension)
 
         # 打印将要改名的文件列表
-        print("未匹配到的文件列表：")
+        print("\033[33m" + "未匹配到的文件列表：")
         for i, old_filename in enumerate(files_not_match):
             print(f"{i}. {old_filename}")
-        print("将要改名的文件列表：")
+        print("\033[31m" + "可能被处理掉的正确对应：")
+        for idx, (i, j) in enumerate(word_matcher.zero_positions):
+            print("\033[31m" + f"{idx}.{word_matcher.list2[j]} \033[0m-x->\033[31m {word_matcher.list1[i]}" + "\033[0m")
+        print("\033[0m将要改名的文件列表：")
         for i, (old_filename, _, new_filename, _) in enumerate(files_to_rename):
             print(f"{i}. {old_filename} --> {new_filename}")
 
