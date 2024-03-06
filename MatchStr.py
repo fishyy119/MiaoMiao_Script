@@ -47,7 +47,14 @@ class WordMatcher:
         # 查询方式：match_matrix[S_index][L_index]
         # 歌词L为主动方，歌曲S为被动方
 
-        match_matrix_T = list(zip(*self.match_matrix))
+        # 转置，此变量会被更改用于记录其他信息，self.match_matrix保持不变
+        match_matrix_T = []
+        for i in range(len(self.match_matrix[0])):
+            temp = []
+            for j in range(len(self.match_matrix)):
+                temp.append(self.match_matrix[j][i])
+            match_matrix_T.append(temp)
+
         L_prefs = {L: list(range(len(self.list1))) for L in range(len(self.list2))}  # 用于记录L的待匹配项
         free_L = list(range(len(self.list2)))  
         match_dict = {}  # 顺序S: L
@@ -56,9 +63,13 @@ class WordMatcher:
             L = free_L.pop(0)
             if len(L_prefs[L]) == 0:  # 已经配过过所有歌曲的L:不再进行匹配，相当于被移出free_L
                 continue
+            if max(match_matrix_T[L]) == 0:  # 已经全为0，无需匹配（强行匹配会出错），相当于被移出free_L
+                continue
+            else:
+                S = match_matrix_T[L].index(max(match_matrix_T[L]))  # 取出最优的歌曲
+                match_matrix_T[L][S] = 0  # 避免下次取到同一个最优歌曲
+                L_prefs[L].remove(S)  # 真正意义上的取出
 
-            first_S_index = match_matrix_T[L].index(max(match_matrix_T[L]))  # 取出最优的歌曲
-            S = L_prefs[L].pop(first_S_index)
             if self.match_matrix[S][L] != 0:  # 忽略相似度为0项
                 if S not in match_dict:  # S未匹配，则进行配对
                     match_dict[S] = L
