@@ -2,8 +2,6 @@ import re
 import os
 '''
 tudo:
-match_matrix的处理有些不合理，尤其是一行内有多个非零项取第一项的部分
-重命名大小写有问题
 '''
 class WordMatcher:
     '''
@@ -17,8 +15,8 @@ class WordMatcher:
         self.word_list1 = []  # 单词集合的列表
         self.word_list2 = []  # 单词集合的列表
         self.match_matrix = []  # 映射矩阵,len(list1)xlen(list2)
-        self.match_map = [-1] * len(list2)  # 剔除矩阵中的0项，将其精简为列表
-        self.zero_positions = []  # 记录match_matrix处理中被消去的可能正确匹配
+        self.match_map = [-1] * len(list2)  # 直接用于重命名的映射列表
+        self.zero_positions = []  # 记录match_matrix处理中被消去的可能正确匹配(未用到)
         pass
 
     @staticmethod
@@ -34,27 +32,45 @@ class WordMatcher:
         union = len(set1.union(set2))
         return intersection / union
     
-    def _cal_matrix(self):
-        # 寻找每列的最大值，将其设为1，其他置0，并记录被置零项的坐标
-        max_values = [max(col) for col in zip(*self.match_matrix)]  # 获取每列的最大值
-        for j, col_max_value in enumerate(max_values):  # 遍历每列的最大值
-            for i, value in enumerate(self.match_matrix):
-                if value[j] == col_max_value and col_max_value != 0:  # 如果当前值等于该列的最大值(最大值为0说明完全不匹配，不应置1)
-                    value[j] = 1  # 将其设为1
-                else:
-                    value[j] = 0  # 否则置为0
-        
-        # 检查每行是否只有一个非零项，生成match_map
-        for i, row in enumerate(self.match_matrix):
-            non_zero_index = None
-            for j, value in enumerate(row):
-                if value != 0:
-                    if non_zero_index is None:
-                        non_zero_index = j
-                        self.match_map[j] = i
+    def _init_similarity_matrix(self):
+        # 初始化相似度矩阵
+        for word1 in self.word_list1:
+            row = []
+            for word2 in self.word_list2:
+                similarity = self._jaccard_similarity(word1, word2)
+                row.append(similarity)
+            self.match_matrix.append(row)
+
+    def _find_stable_match(self):
+        # 稳定匹配的G-S算法（略过偏好0项）
+        # 双方的偏好列表都共享自match_matrix
+        # 查询方式：match_matrix[S_index][L_index]
+        # 歌词L为主动方，歌曲S为被动方
+
+        L_prefs = {L: list(range(len(self.list1))) for L in range(len(self.list2))}  # 用于记录L的待匹配项
+        free_L = list(range(len(self.list2)))  
+        match_dict = {}  # 顺序S: L
+
+        while free_L:
+            L = free_L.pop(0)
+            if len(L_prefs[L]) == 0:  # 已经配过过所有歌曲的L:不再进行匹配，相当于被移出free_L
+                continue
+
+            S = L_prefs[L].pop(0)
+            if self.match_matrix[S][L] != 0:  # 忽略相似度为0项
+                if S not in match_dict:  # S未匹配，则进行配对
+                    match_dict[S] = L
+                else:  # S已匹配，比较现有匹配与新匹配的相似度
+                    L2 = match_dict[S]
+                    if self.match_matrix[S][L] > self.match_matrix[S][L2]:
+                        free_L.append(L2)
+                        match_dict[S] = L
                     else:
-                        self.match_matrix[i][j] = 0
-                        self.zero_positions.append((i, j))
+                        free_L.append(L)
+            else:
+                free_L.append(L)  # 加回去
+        for S, L in match_dict.items():
+            self.match_map[L] = S
 
     def match_words(self):
         for string in self.list1:
@@ -63,12 +79,8 @@ class WordMatcher:
         for string in self.list2:
             self.word_list2.append(self._extract_words(string))
 
-        for idx, word1 in enumerate(self.word_list1):
-            self.match_matrix.append([])
-            for word2 in self.word_list2:
-                self.match_matrix[idx].append(self._jaccard_similarity(word1, word2))
-        
-        self._cal_matrix()
+        self._init_similarity_matrix()
+        self._find_stable_match()
 
 class FileReader():
     def __init__(self, folder_path):
@@ -126,12 +138,9 @@ class FileReader():
         print("\033[33m" + "未匹配到的文件列表：")
         for i, old_filename in enumerate(files_not_match):
             print(f"{i}. {old_filename}")
-        print("\033[31m" + "可能被处理掉的正确对应：")
-        for idx, (i, j) in enumerate(word_matcher.zero_positions):
-            print("\033[31m" + f"{idx}.{word_matcher.list2[j]} \033[0m-x->\033[31m {word_matcher.list1[i]}" + "\033[0m")
         print("\033[0m将要改名的文件列表：")
         for i, (old_filename, _, new_filename, _) in enumerate(files_to_rename):
-            print(f"{i}. {old_filename} --> {new_filename}")
+            print(f"{i}. {old_filename} \033[32m-->\033[0m {new_filename}")
 
         # 询问用户是否跳过某些文件
         skip_indices = []
