@@ -7,11 +7,12 @@ class WordMatcher:
     '''
     list(字符串列表) --> word_list(单词集合的列表) --> match_matrix(映射矩阵)  --> match_map(映射列表)
     '''
-    def __init__(self, list1, list2, pathlist1, pathlist2):
+    def __init__(self, list1, list2, pathlist1, pathlist2, synonyms):
         self.list1 = list1  # 目标字符串列表
         self.list2 = list2  # 待对应字符串列表
         self.pathlist1 = pathlist1  # 路径列表
         self.pathlist2 = pathlist2
+        self.synonyms = synonyms  # 同义词替换的储存
         self.word_list1 = []  # 单词集合的列表
         self.word_list2 = []  # 单词集合的列表
         self.match_matrix = []  # 映射矩阵,len(list1)xlen(list2)
@@ -19,10 +20,16 @@ class WordMatcher:
         self.zero_positions = []  # 记录match_matrix处理中被消去的可能正确匹配(未用到)
         pass
 
-    @staticmethod
-    def _extract_words(string):
+    def _extract_words(self, string):
         # 使用正则表达式提取所有单词字符组成的单词
         words = re.findall(r'\b\w+\b', string)
+        # 小写化与同义词替换（仅用于相似度计算，不用于改名）
+        for idx, word in enumerate(words):
+            word = word.lower()
+            if word in self.synonyms.keys():
+                word = self.synonyms.get(word)
+
+            words[idx] = word
         return set(words)
 
     @staticmethod
@@ -212,14 +219,17 @@ def get_validated_path(prompt="请输入文件夹路径：", default="."):
     return folder_path, recursive
 
 if __name__ == "__main__":
-    folder_path, recursive = get_validated_path()  # 文件路径，是否扫描子文件夹
+    #######################################################
     extension1 = [".mp3",".flac",".wav"]  # 作为改名目标文件名的类型
     extension2 = [".lrc"]  # 需要改名的类型
+    synonyms = {"version": "ver", "instrumental": "inst"}  # 同义词的替换
+    #######################################################
+    folder_path, recursive = get_validated_path()  # 文件路径，是否扫描子文件夹
     file_reader = FileReader(folder_path)
     list1, pathlist1 = file_reader.read_filenames(extension1, recursive)
     list2, pathlist2 = file_reader.read_filenames(extension2, recursive)
 
-    word_matcher = WordMatcher(list1, list2, pathlist1, pathlist2)
+    word_matcher = WordMatcher(list1, list2, pathlist1, pathlist2, synonyms)
     word_matcher.match_words()
 
     file_reader.rename_files(word_matcher)
