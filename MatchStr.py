@@ -2,6 +2,8 @@ import re
 import os
 '''
 tudo:
+对于带序号的文件名加以识别？
+单独配置json？
 '''
 class WordMatcher:
     '''
@@ -214,8 +216,8 @@ class FileReader():
         # 打印结果报告
         print(f"成功重命名文件数：{renamed_count}，跳过文件数：{skipped_count}，失败文件数：{error_count}")
 
-def get_validated_path(prompt: str="请输入文件夹路径：", 
-                       default: str="."
+def get_validated_path(prompt: str = "请输入文件夹路径：", 
+                       default: str = "."
                        ) -> tuple[str, bool]:
     while True:
         folder_path = input(prompt).strip()  # 获取用户输入并去除首尾空格
@@ -238,8 +240,8 @@ def get_validated_path(prompt: str="请输入文件夹路径：",
 
 if __name__ == "__main__":
     #############################################################################
-    extension1 = [".mp3",".flac",".wav"]  # 作为改名目标文件名的类型
-    extension2 = [".lrc"]  # 需要改名的类型
+    extension1 = [".mp3",".flac",".wav",".mkv"]  # 作为改名目标文件名的类型
+    extension2 = [".lrc",".ass"]  # 需要改名的类型
     synonyms = {"version": "ver", "instrumental": "inst"}  # 同义词的替换
     #############################################################################
     folder_path, recursive = get_validated_path()  # 文件路径，是否扫描子文件夹
