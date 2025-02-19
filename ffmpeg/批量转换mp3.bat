@@ -1,3 +1,5 @@
+:: ! 变量延迟太蠢了，拿叹号当标记，文件路径中成对的叹号直接给删没了 
+:: ! 再也不想用这鬼东西了
 @echo off
 
 :: 创建保存mp3文件的目录
@@ -12,6 +14,8 @@ for /r %%d in (*.wav *.flac) do (
     setlocal enabledelayedexpansion
 
     echo Converting: !f!
+    REM echo Executing: ffmpeg -i "!f!" -codec:a libmp3lame -b:a 320k -ar 44100 -ac 2 -loglevel error "mp3_files\!fn!.mp3"
+
     ffmpeg -i "!f!" -codec:a libmp3lame -b:a 320k -ar 44100 -ac 2 -loglevel error "mp3_files/!fn!.mp3"
 )
 
