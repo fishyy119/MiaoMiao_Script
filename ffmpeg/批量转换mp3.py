@@ -1,10 +1,14 @@
+""" 
+使用ffmpeg批量将 .flac/.wav 文件转换为 .mp3 文件，比特率320k，采样率44.1kHz
+input: 待转换文件的父文件夹
+output: 在每个存在待转文件的目录下，创建新目录 mp3_files 容纳转换后文件
+"""
+
 import os
 import os.path as oph
 import subprocess
 from typing import List
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
-
-# TODO: 重名文件的处理
 
 
 def convert_to_mp3(input_file: str, output_folder: str) -> None:
@@ -43,6 +47,7 @@ def process_files(input_files: List[str]) -> None:
 
 
 def generateOutDir(file_path: str) -> str:
+    """拼接输出文件夹路径，同时保证文件夹存在"""
     output_folder: str = oph.join(oph.dirname(file_path), "mp3_files")
     os.makedirs(output_folder, exist_ok=True)
     return output_folder
@@ -50,7 +55,6 @@ def generateOutDir(file_path: str) -> str:
 
 def main() -> None:
     folder: str = input("目标文件夹：")
-    output_folder: str = oph.join(folder, "mp3_files")
     white_list: List[str] = [".wav", ".flac"]
     input_files: List[str] = []
 
