@@ -4,19 +4,18 @@ input: 待转换文件的父文件夹
 output: 在每个存在待转文件的目录下，创建新目录 mp3_files 容纳转换后文件
 """
 
-import os
-import os.path as oph
+from pathlib import Path
 import subprocess
-from typing import List
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
+from typing import List
 
 
-def convert_to_mp3(input_file: str, output_folder: str) -> None:
+def convert_to_mp3(input_file: Path, output_folder: Path) -> None:
     """执行ffmpeg命令，将音频文件转换为mp3格式"""
     command = [
         "ffmpeg",
         "-i",
-        input_file,
+        str(input_file),
         "-codec:a",
         "libmp3lame",
         "-b:a",
@@ -27,16 +26,16 @@ def convert_to_mp3(input_file: str, output_folder: str) -> None:
         "2",
         "-loglevel",
         "error",
-        oph.join(output_folder, oph.splitext(oph.basename(input_file))[0] + ".mp3"),
+        str(output_folder / input_file.with_suffix(".mp3").name),
         "-y",
     ]
     subprocess.run(command)
 
 
-def process_files(input_files: List[str]) -> None:
+def process_files(input_files: List[Path]) -> None:
     """并行处理所有文件"""
     with ThreadPoolExecutor() as executor:
-        futures: List[Future] = []
+        futures: List[Future[None]] = []
         for file in input_files:
             futures.append(executor.submit(convert_to_mp3, file, generateOutDir(file)))
 
@@ -46,23 +45,21 @@ def process_files(input_files: List[str]) -> None:
             print(f"\r已处理[{idx}/{len(futures)}]", end="", flush=True)
 
 
-def generateOutDir(file_path: str) -> str:
+def generateOutDir(file_path: Path) -> Path:
     """拼接输出文件夹路径，同时保证文件夹存在"""
-    output_folder: str = oph.join(oph.dirname(file_path), "mp3_files")
-    os.makedirs(output_folder, exist_ok=True)
+    output_folder: Path = Path(file_path).parent / "mp3_files"
+    output_folder.mkdir(parents=True, exist_ok=True)
     return output_folder
 
 
 def main() -> None:
     folder: str = input("目标文件夹：")
     white_list: List[str] = [".wav", ".flac"]
-    input_files: List[str] = []
+    input_files: List[Path] = []
 
-    # 预处理
-    for root, _, files in os.walk(folder):
-        for file in files:
-            if file.endswith(tuple(white_list)):
-                input_files.append(oph.join(root, file))
+    for path in Path(folder).rglob("*"):
+        if path.suffix in white_list:
+            input_files.append(path)
 
     process_files(input_files)
 
