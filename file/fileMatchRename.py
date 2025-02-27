@@ -1,38 +1,37 @@
 import re
 import os
-'''
-tudo:
-对于带序号的文件名加以识别？
-单独配置json？
-'''
+
+from typing import List, Dict, Set, Tuple
+
+"""
+TODO:
+对于带序号的文件名加以识别
+"""
+
+
 class WordMatcher:
-    '''
-    list(字符串列表) --> word_list(单词集合的列表) --> match_matrix(映射矩阵)  --> match_map(映射列表)
-    '''
-    def __init__(self, 
-                 list1: list[str], 
-                 list2: list[str], 
-                 pathlist1: list[str], 
-                 pathlist2: list[str], 
-                 synonyms: dict[str, str]
-                 ) -> None:
+    """
+    List(字符串列表) --> word_list(单词集合的列表) --> match_matrix(映射矩阵)  --> match_map(映射列表)
+    """
+
+    def __init__(
+        self, list1: List[str], list2: List[str], pathlist1: List[str], pathlist2: List[str], synonyms: Dict[str, str]
+    ) -> None:
         self.list1 = list1  # 目标字符串列表
         self.list2 = list2  # 待对应字符串列表
         self.pathlist1 = pathlist1  # 路径列表
         self.pathlist2 = pathlist2
         self.synonyms = synonyms  # 同义词替换的储存
-        self.word_list1 = []  # 单词集合的列表
-        self.word_list2 = []  # 单词集合的列表
-        self.match_matrix = []  # 映射矩阵,len(list1)xlen(list2)
+        self.word_list1: List[Set[str]] = []  # 单词集合的列表
+        self.word_list2: List[Set[str]] = []  # 单词集合的列表
+        self.match_matrix: List[List[float]] = []  # 映射矩阵,len(list1)xlen(list2)
         self.match_map = [-1] * len(list2)  # 直接用于重命名的映射列表
         self.zero_positions = []  # 记录match_matrix处理中被消去的可能正确匹配(未用到)
         pass
 
-    def _extract_words(self, 
-                       string: str
-                       ) -> set[str]:
+    def _extract_words(self, string: str) -> Set[str]:
         # 使用正则表达式提取所有单词字符组成的单词
-        words = re.findall(r'\b\w+\b', string)
+        words = re.findall(r"\b\w+\b", string)
         # 小写化与同义词替换（仅用于相似度计算，不用于改名）
         for idx, word in enumerate(words):
             word = word.lower()
@@ -42,18 +41,16 @@ class WordMatcher:
         return set(words)
 
     @staticmethod
-    def _jaccard_similarity(set1: set[str], 
-                            set2: set[str]
-                            ) -> float:
+    def _jaccard_similarity(set1: Set[str], set2: Set[str]) -> float:
         # 计算相似度
         intersection = len(set1.intersection(set2))
         union = len(set1.union(set2))
         return intersection / union
-    
+
     def _init_similarity_matrix(self) -> None:
         # 初始化相似度矩阵
         for word1 in self.word_list1:
-            row = []
+            row: List[float] = []
             for word2 in self.word_list2:
                 similarity = self._jaccard_similarity(word1, word2)
                 row.append(similarity)
@@ -66,16 +63,16 @@ class WordMatcher:
         # 歌词L为主动方，歌曲S为被动方
 
         # 转置，此变量会被更改用于记录其他信息，self.match_matrix保持不变
-        match_matrix_T = []
+        match_matrix_T: List[List[float]] = []
         for i in range(len(self.match_matrix[0])):
-            temp = []
+            temp: List[float] = []
             for j in range(len(self.match_matrix)):
                 temp.append(self.match_matrix[j][i])
             match_matrix_T.append(temp)
 
         L_prefs = {L: list(range(len(self.list1))) for L in range(len(self.list2))}  # 用于记录L的待匹配项
-        free_L = list(range(len(self.list2)))  
-        match_dict = {}  # 顺序S: L
+        free_L = list(range(len(self.list2)))
+        match_dict: Dict[int, int] = {}  # 顺序S: L
 
         while free_L:
             L = free_L.pop(0)
@@ -100,8 +97,9 @@ class WordMatcher:
                         free_L.append(L)
             else:
                 free_L.append(L)  # 加回去
-        for S, L in match_dict.items():
-            self.match_map[L] = S
+
+        for _S, _L in match_dict.items():
+            self.match_map[_L] = _S
 
     def match_words(self) -> None:
         for string in self.list1:
@@ -113,45 +111,39 @@ class WordMatcher:
         self._init_similarity_matrix()
         self._find_stable_match()
 
-class FileReader():
-    def __init__(self, 
-                 folder_path: list[str]
-                 ) -> None:
+
+class FileReader:
+    def __init__(self, folder_path: str) -> None:
         self.folder_path = folder_path
 
-    def read_filenames(self, 
-                       file_extension: list[str], 
-                       recursive: bool = False
-                       ) -> tuple[list, list]:
-        filenames = []
-        pathlist = []
-        if recursive: # 包括对子文件夹的扫描
-            for root, dirs, files in os.walk(self.folder_path):
+    def read_filenames(self, file_extension: List[str], recursive: bool = False) -> tuple[List[str], List[str]]:
+        filenames: List[str] = []
+        pathlist: List[str] = []
+        if recursive:  # 包括对子文件夹的扫描
+            for root, _, files in os.walk(self.folder_path):
                 for filename in files:
                     filename_lower = filename.lower()
                     for extension in file_extension:
                         if filename_lower.endswith(extension):
                             filenames.append(filename)
                             pathlist.append(os.path.join(root, filename))
-        else: # 不包括子文件夹
+        else:  # 不包括子文件夹
             for filename in os.listdir(self.folder_path):
                 filename_lower = filename.lower()
                 for extension in file_extension:
                     if filename_lower.endswith(extension):
                         filenames.append(filename)
                         pathlist.append(os.path.join(self.folder_path, filename))
-        
+
         if not filenames:
             input("目录下没有找到符合条件的文件。程序即将退出。")
             exit()  # 如果列表为空，退出程序
         return filenames, pathlist
-    
-    def rename_files(self, 
-                     word_matcher: WordMatcher
-                     ) -> None:
+
+    def rename_files(self, word_matcher: WordMatcher) -> None:
         # 获取匹配文件列表与未匹配列表
-        files_to_rename = []
-        files_not_match = []
+        files_to_rename: List[Tuple[str, str, str, str]] = []
+        files_not_match: List[str] = []
         for idx, matched_idx in enumerate(word_matcher.match_map):
             if matched_idx != -1:
                 # 获取文件名
@@ -163,10 +155,13 @@ class FileReader():
                 # 构建文件的完整路径
                 old_file_path = word_matcher.pathlist2[idx]
                 new_file_path = word_matcher.pathlist1[matched_idx]  # 其中的后缀名需要处理
-                new_file_path = os.path.join(os.path.dirname(new_file_path), new_filename_without_extension + old_extension)
+                new_file_path = os.path.join(
+                    os.path.dirname(new_file_path), new_filename_without_extension + old_extension
+                )
                 # 将文件信息添加到列表中
-                files_to_rename.append((old_filename_without_extension, old_file_path, \
-                                        new_filename_without_extension, new_file_path))
+                files_to_rename.append(
+                    (old_filename_without_extension, old_file_path, new_filename_without_extension, new_file_path)
+                )
             else:
                 old_filename = word_matcher.list2[idx]
                 old_filename_without_extension, _ = os.path.splitext(old_filename)
@@ -216,9 +211,8 @@ class FileReader():
         # 打印结果报告
         print(f"成功重命名文件数：{renamed_count}，跳过文件数：{skipped_count}，失败文件数：{error_count}")
 
-def get_validated_path(prompt: str = "请输入文件夹路径：", 
-                       default: str = "."
-                       ) -> tuple[str, bool]:
+
+def get_validated_path(prompt: str = "请输入文件夹路径：", default: str = ".") -> Tuple[str, bool]:
     while True:
         folder_path = input(prompt).strip()  # 获取用户输入并去除首尾空格
         if not folder_path:  # 如果用户没有输入任何内容，则使用默认值
@@ -228,7 +222,7 @@ def get_validated_path(prompt: str = "请输入文件夹路径：",
             break
         else:
             print("路径不存在，请重新输入。")
-        
+
     # 询问是否递归读取子文件夹
     recursive_input = input("是否递归读取子文件夹？(留空为否，任意字符为是): ").strip().lower()
     if recursive_input == "":
@@ -238,10 +232,11 @@ def get_validated_path(prompt: str = "请输入文件夹路径：",
 
     return folder_path, recursive
 
+
 if __name__ == "__main__":
     #############################################################################
-    extension1 = [".mp3",".flac",".wav",".mkv"]  # 作为改名目标文件名的类型
-    extension2 = [".lrc",".ass"]  # 需要改名的类型
+    extension1 = [".mp3", ".flac", ".wav", ".mkv"]  # 作为改名目标文件名的类型
+    extension2 = [".lrc", ".ass"]  # 需要改名的类型
     synonyms = {"version": "ver", "instrumental": "inst"}  # 同义词的替换
     #############################################################################
     folder_path, recursive = get_validated_path()  # 文件路径，是否扫描子文件夹

@@ -1,9 +1,16 @@
 import os
 import shutil
 
+from typing import List, Dict, Set, TypedDict
+
+
+class PrefixRecoderDict(TypedDict):
+    existing_indices: Set[int]
+    gaps: Set[int]
+
 
 class ImageClassifier:
-    def __init__(self, input_dir: str, result_dir: str, white_list: list) -> None:
+    def __init__(self, input_dir: str, result_dir: str, white_list: List[str]) -> None:
         """
         __init__
 
@@ -86,7 +93,7 @@ class ImageClassifier:
                     f.write(f"{index},")
                 f.write("\n")
 
-    def _get_prefix_recoder(self, loglevel=False) -> dict:
+    def _get_prefix_recoder(self, loglevel: bool = False) -> Dict[str, PrefixRecoderDict]:
         """
         获得已经存在的序号，即输出文件夹中图片的命名序号
 
@@ -98,10 +105,10 @@ class ImageClassifier:
                                 包含已存在序号的集合(existing_indices)
                                 和中断点的集合(gaps)
         """
-        prefix_recoder = {}
+        prefix_recoder: Dict[str, PrefixRecoderDict] = {}
         self.sum_in_output = 0
 
-        for root, _, files in os.walk(self.result_dir):
+        for _, _, files in os.walk(self.result_dir):
             for filename in files:
                 if filename == "!index.txt":
                     continue  # 记录文件，应当跳过
@@ -135,7 +142,7 @@ class ImageClassifier:
 
         return prefix_recoder
 
-    def _calculate_gaps(self, prefix_recoder: set) -> set:
+    def _calculate_gaps(self, prefix_recoder: Set[int]) -> Set[int]:
         """
         计算中断点，即未使用的序号
 
@@ -197,6 +204,7 @@ def main() -> None:
             print(f"输入错误：{e} 。请重新输入。")
 
     # 获取输入文件夹路径
+    input_dir: str = ">"
     if input_mode >= 2:
         while True:
             input_dir = input("请输入输入文件夹路径：\n")

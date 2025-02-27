@@ -5,13 +5,14 @@ from tqdm import tqdm
 # 当前脚本所在目录
 current_dir = os.path.dirname(os.path.abspath(__file__))
 # 新文件夹路径
-output_dir = os.path.join(current_dir, 'processed_images')
+output_dir = os.path.join(current_dir, "processed_images")
 
 # 如果输出目录不存在，创建它
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
-def split_and_move_image(image_path):
+
+def split_and_move_image(image_path: str) -> None:
     try:
         with Image.open(image_path) as img:
             width, height = img.size
@@ -44,8 +45,9 @@ def split_and_move_image(image_path):
     except Exception as e:
         print(f"Error processing {image_path}: {e}")
 
+
 # 获取所有图片文件
-image_files = [f for f in os.listdir(current_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff'))]
+image_files = [f for f in os.listdir(current_dir) if f.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".tiff"))]
 
 # 使用 tqdm 显示进度条
 for file_name in tqdm(image_files, desc="Processing images"):
