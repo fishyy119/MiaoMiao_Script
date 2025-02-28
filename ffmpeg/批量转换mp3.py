@@ -61,6 +61,7 @@ def main() -> None:
         if path.suffix in white_list:
             input_files.append(path)
 
+    print(f"共找到{len(input_files)}个待处理文件...")
     process_files(input_files)
 
 
