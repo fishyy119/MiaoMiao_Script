@@ -1,4 +1,4 @@
-""" 
+"""
 使用ffmpeg批量将 .flac/.wav 文件转换为 .mp3 文件，比特率320k，采样率44.1kHz
 input: 待转换文件的父文件夹
 output: 在每个存在待转文件的目录下，创建新目录 mp3_files 容纳转换后文件
@@ -16,18 +16,20 @@ def convert_to_mp3(input_file: Path, output_folder: Path) -> None:
         "ffmpeg",
         "-i",
         str(input_file),
-        "-codec:a",
+        "-codec:v",  # 复制封面
+        "copy",
+        "-codec:a",  # 音频编码器
         "libmp3lame",
-        "-b:a",
+        "-b:a",  # 音频比特率
         "320k",
-        "-ar",
+        "-ar",  # 采样率
         "44100",
-        "-ac",
+        "-ac",  # 声道
         "2",
-        "-loglevel",
+        "-loglevel",  # 仅输出error
         "error",
         str(output_folder / input_file.with_suffix(".mp3").name),
-        "-y",
+        "-y",  # 自动替换同名文件
     ]
     subprocess.run(command)
 
