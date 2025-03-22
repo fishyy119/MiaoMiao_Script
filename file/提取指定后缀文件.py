@@ -4,8 +4,21 @@ output: 将符合后缀的文件提取到结果目录中，并按第一级目录
 """
 
 from pathlib import Path
+import hashlib
 import shutil
 from typing import List
+
+
+# TODO: 统计
+
+
+def calculate_md5(file_path: Path, chunk_size: int = 8192) -> str:
+    """计算文件的 MD5 哈希值"""
+    hasher = hashlib.md5()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(chunk_size), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 def remove_empty_dirs(directory: Path) -> None:
@@ -15,6 +28,23 @@ def remove_empty_dirs(directory: Path) -> None:
     for sub_dir in directory.iterdir():
         if sub_dir.is_dir() and not any(sub_dir.iterdir()):
             sub_dir.rmdir()
+
+
+def copy_with_md5_check(src_path: Path, dest_path: Path) -> None:
+    """如果目标文件存在，检查 MD5，相同则跳过，不同则加 MD5 后缀"""
+    if dest_path.exists():
+        src_md5 = calculate_md5(src_path)
+        dest_md5 = calculate_md5(dest_path)
+
+        if src_md5 == dest_md5:
+            return
+
+        # 生成新的文件路径，添加 MD5 哈希前 8 位作为后缀
+        new_dest_path = dest_path.parent / f"{src_path.stem}.{src_md5[:8]}{src_path.suffix}"
+        print(new_dest_path)
+        shutil.copy2(src_path, new_dest_path)
+    else:
+        shutil.copy2(src_path, dest_path)
 
 
 def extract_files(
@@ -57,16 +87,15 @@ def extract_files(
                         else:
                             dest_file_path = dest_sub_dir / file_path.name
 
-                        # 同名文件加个后缀
-                        if dest_file_path.exists():
-                            dest_file_path = (
-                                dest_sub_dir / f"{file_path.stem}_{file_path.stat().st_mtime}{file_path.suffix}"
-                            )
-                        shutil.copy(file_path, dest_file_path)
+                        copy_with_md5_check(file_path, dest_file_path)
         remove_empty_dirs(dest_dir)
 
 
 if __name__ == "__main__":
     src_dir = input("输入路径: ")
-    white_list = [".torrent"]
-    extract_files(Path(src_dir), Path(src_dir), white_list=white_list, disable_sort=False, ignore_dest_dir=True)
+    # white_list = [".torrent"]
+    # white_list = [".mp3"]
+    # white_list = [".jpg", ".jpeg", ".png"]
+    white_list = [".ass"]
+
+    extract_files(Path(src_dir), Path(src_dir), white_list=white_list, disable_sort=True, ignore_dest_dir=True)
