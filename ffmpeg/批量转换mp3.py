@@ -1,16 +1,17 @@
 """
 使用ffmpeg批量将 .flac/.wav 文件转换为 .mp3 文件，比特率320k，采样率44.1kHz
 input: 待转换文件的父文件夹
-output: 在每个存在待转文件的目录下，创建新目录 mp3_files 容纳转换后文件
+output: 在父文件夹同级处创建备份文件夹，父文件夹中转换成功的.mp3文件会原地替换掉转换前文件
 """
 
 from pathlib import Path
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from typing import List
+from shutil import copytree, Error
 
 
-def convert_to_mp3(input_file: Path, output_folder: Path) -> None:
+def convert_to_mp3(input_file: Path) -> None:
     """执行ffmpeg命令，将音频文件转换为mp3格式"""
     command = [
         "ffmpeg",
@@ -28,10 +29,12 @@ def convert_to_mp3(input_file: Path, output_folder: Path) -> None:
         "2",
         "-loglevel",  # 仅输出error
         "error",
-        str(output_folder / input_file.with_suffix(".mp3").name),
+        str(input_file.with_suffix(".mp3")),
         "-y",  # 自动替换同名文件
     ]
-    subprocess.run(command)
+    result = subprocess.run(command)
+    if result.returncode == 0:
+        input_file.unlink()  # 删除原始文件
 
 
 def process_files(input_files: List[Path]) -> None:
@@ -39,7 +42,12 @@ def process_files(input_files: List[Path]) -> None:
     with ThreadPoolExecutor() as executor:
         futures: List[Future[None]] = []
         for file in input_files:
-            futures.append(executor.submit(convert_to_mp3, file, generateOutDir(file)))
+            futures.append(
+                executor.submit(
+                    convert_to_mp3,
+                    file,
+                )
+            )
 
         # 使用 as_completed 来监视任务的完成情况
         for idx, future in enumerate(as_completed(futures), 1):
@@ -47,19 +55,22 @@ def process_files(input_files: List[Path]) -> None:
             print(f"\r已处理[{idx}/{len(futures)}]", end="", flush=True)
 
 
-def generateOutDir(file_path: Path) -> Path:
-    """拼接输出文件夹路径，同时保证文件夹存在"""
-    output_folder: Path = Path(file_path).parent / "mp3_files"
-    output_folder.mkdir(parents=True, exist_ok=True)
-    return output_folder
-
-
 def main() -> None:
-    folder: str = input("目标文件夹：")
-    white_list: List[str] = [".wav", ".flac"]
+    folder: Path = Path(input("目标文件夹："))
+    # 复制目标文件夹并加上后缀 .bak
+    backup_folder: Path = folder.with_name(folder.name + ".bak")
+    try:
+        folder_size = sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())
+        print(f"正在备份文件夹，文件夹大小: {folder_size / (1024 * 1024):.2f} MB")
+        copytree(folder, backup_folder)
+        print(f"已创建备份文件夹：{backup_folder}")
+    except Error as e:
+        print(f"备份过程中发生错误：{e}")
+
+    white_list: List[str] = [".wav", ".flac", ".dsf"]
     input_files: List[Path] = []
 
-    for path in Path(folder).rglob("*"):
+    for path in folder.rglob("*"):
         if path.suffix in white_list:
             input_files.append(path)
 
