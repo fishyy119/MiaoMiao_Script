@@ -4,11 +4,11 @@ input: 待转换文件的父文件夹
 output: 在父文件夹同级处创建备份文件夹，父文件夹中转换成功的.mp3文件会原地替换掉转换前文件
 """
 
-from pathlib import Path
 import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed, Future
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from pathlib import Path
+from shutil import Error, copytree
 from typing import List
-from shutil import copytree, Error
 
 
 def convert_to_mp3(input_file: Path) -> None:
@@ -62,8 +62,11 @@ def main() -> None:
     try:
         folder_size = sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())
         print(f"正在备份文件夹，文件夹大小: {folder_size / (1024 * 1024):.2f} MB")
-        copytree(folder, backup_folder)
-        print(f"已创建备份文件夹：{backup_folder}")
+        if folder_size / (1024**3) > 3:
+            copy_confirm = input("文件过大，是否继续备份(y/[n])")
+            if copy_confirm == "y":
+                copytree(folder, backup_folder)
+                print(f"已创建备份文件夹：{backup_folder}")
     except Error as e:
         print(f"备份过程中发生错误：{e}")
 
