@@ -155,14 +155,17 @@ class WordMatcher:
 
 
 class FileReader:
-    def __init__(self, folder_path: Path, SUFFIX_PART_LENGTH_THRESHOLD: int = 10) -> None:
+    def __init__(self, folder_path: Path, SUFFIX_PART_LENGTH_THRESHOLD: int = 10, SUFFIX_PART_MAX_NUM: int = 2) -> None:
         """
         Args:
             folder_path (Path): 工作的文件夹路径
             SUFFIX_PART_LENGTH_THRESHOLD (int, optional): 用于识别多个字段串联的后缀名，如".tc.ass"，根据长度筛选
+            SUFFIX_PART_MAX_NUM (int, optional): 用于识别多个字段串联的后缀名，如".tc.ass"，通关限制段数实现
+            TODO: 上面两个参数...
         """
         self.folder_path = folder_path
         self.SUFFIX_PART_LENGTH_THRESHOLD = SUFFIX_PART_LENGTH_THRESHOLD
+        self.SUFFIX_PART_MAX_NUM = SUFFIX_PART_MAX_NUM
 
     def read_filenames(self, file_extension: List[str], recursive: bool = False) -> Tuple[List[str], List[Path]]:
         filenames: List[str] = []
@@ -197,10 +200,14 @@ class FileReader:
                 # 保留一些额外的标注性后缀，如".tc.ass"，根据长度筛选
                 old_filename_parts = old_filename.rsplit(".")
                 old_extension = ""
+                part_num = 0  # 用于计数后缀名的段数
                 for word in reversed(old_filename_parts):
                     if len(word) > self.SUFFIX_PART_LENGTH_THRESHOLD:
                         break
                     old_extension = "." + word + old_extension
+                    part_num += 1
+                    if part_num >= self.SUFFIX_PART_MAX_NUM:
+                        break
 
                 new_filename_without_extension = new_file_path.stem
                 # 构建文件的完整路径
@@ -284,10 +291,11 @@ if __name__ == "__main__":
     extension2 = [".lrc", ".ass"]  # 需要改名的类型
     synonyms = {"version": "ver", "instrumental": "inst"}  # 同义词的替换
     black_list1 = ["NCOP", "NCED", "SP"]  # 忽略有这些词组的文件（大小写不敏感），对应前面extension1的文件
-    black_list2 = ["TUcaptions", "sc", "SP"]  # 对应前面extension2的文件
+    black_list2 = ["TUcaptions", "SP"]  # 对应前面extension2的文件
     ENHANCE_DIGIT_WEIGHT = True  # 数字词组的增强选项，开启后会将数字词组重复若干次来间接增加其权重，同时前导零会被去除
     DIGIT_REPEAT = 3  # 数字词组的重复次数（在前面`ENHANCE_DIGIT_WEIGHT`开启时有效）
     SUFFIX_PART_LENGTH_THRESHOLD = 10  # 用于识别多个字段串联的后缀名，如".tc.ass"，此处为每一段的长度阈值
+    SUFFIX_PART_MAX_NUM = 2  # 同上，这个设置最大段数
     #############################################################################
     folder_path, recursive = get_validated_path()  # 文件路径，是否扫描子文件夹
     file_reader = FileReader(folder_path, SUFFIX_PART_LENGTH_THRESHOLD=SUFFIX_PART_LENGTH_THRESHOLD)
