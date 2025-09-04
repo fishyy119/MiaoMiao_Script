@@ -61,12 +61,15 @@ def main() -> None:
     backup_folder: Path = folder.with_name(folder.name + ".bak")
     try:
         folder_size = sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())
+        copy_flag = True
         print(f"正在备份文件夹，文件夹大小: {folder_size / (1024 * 1024):.2f} MB")
         if folder_size / (1024**3) > 3:
             copy_confirm = input("文件过大，是否继续备份(y/[n])")
-            if copy_confirm == "y":
-                copytree(folder, backup_folder)
-                print(f"已创建备份文件夹：{backup_folder}")
+            if copy_confirm != "y":
+                copy_flag = False
+        if copy_flag:
+            copytree(folder, backup_folder)
+            print(f"已创建备份文件夹：{backup_folder}")
     except Error as e:
         print(f"备份过程中发生错误：{e}")
 
