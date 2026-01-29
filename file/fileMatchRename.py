@@ -1,7 +1,6 @@
 import re
 from pathlib import Path
-
-from typing import List, Dict, Tuple
+from typing import Dict, List, Tuple
 
 
 class WordMatcher:
@@ -70,9 +69,18 @@ class WordMatcher:
                 word = self.synonyms.get(word, word)
 
             # 用于加强数字词组的权重，通过重复其若干次，同时数字的前导零会被清除
-            if self.ENHANCE_DIGIT_WEIGHT and word.isdigit():
-                word = str(int(word))  # 去掉前导零
-                enhance_digit.extend([word] * (self.DIGIT_REPEAT - 1))
+            if self.ENHANCE_DIGIT_WEIGHT:
+                has_digit = bool(re.search(r"\d", word))
+                has_non_english = bool(re.search(r"[^A-Za-z0-9]", word))
+
+                if has_digit and has_non_english:
+                    digits: List[str] = re.findall(r"\d+", word)
+                    for digit in digits:
+                        enhance_digit.extend([str(int(digit))] * (self.DIGIT_REPEAT))
+
+                if word.isdigit():
+                    word = str(int(word))  # 去掉前导零
+                    enhance_digit.extend([word] * (self.DIGIT_REPEAT - 1))
 
             words[idx] = word
 
