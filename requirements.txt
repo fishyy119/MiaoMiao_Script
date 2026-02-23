@@ -1,5 +1,12 @@
 # Python 3.12.7
 tqdm==4.67.1
 rich
+
+# pdf
 PyMuPDF==1.26.7
 pymupdf-stubs==1.26.7
+
+# scraper
+requests
+BeautifulSoup4
+types-beautifulsoup4
