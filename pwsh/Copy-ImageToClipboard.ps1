@@ -1,6 +1,5 @@
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$Path
+    [string]$Path = $args[0]
 )
 
 # 必须在 STA 线程下运行
@@ -15,7 +14,7 @@ Add-Type -AssemblyName WindowsBase
 
 try {
     # 使用 WPF BitmapImage（基于 WIC）
-    # 转换为绝对路径
+    # 转换为绝对路径，不解析特殊字符
     $file = Get-Item -LiteralPath $Path -ErrorAction Stop
     $fullPath = $file.FullName
 
