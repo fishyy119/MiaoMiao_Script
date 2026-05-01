@@ -76,14 +76,14 @@ def process_page(session: requests.Session, base_url: str, page: int, output_dir
 def main() -> None:
     global REQUEST_TIMEOUT_SECONDS
 
-    parser: argparse.ArgumentParser = argparse.ArgumentParser(description="Yandex 图片抓取脚本")
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(description="yande 图片抓取脚本")
     parser.add_argument("url", type=str, help="目标网页 URL")
-    parser.add_argument("-o", "--output", type=str, default=None, help="图片保存目录 (默认: .yandex)")
+    parser.add_argument("-o", "--output", type=str, default=None, help="图片保存目录 (默认: .yande)")
     parser.add_argument("--timeout", type=int, default=REQUEST_TIMEOUT_SECONDS, help="请求超时秒数 (默认: 15)")
     args: argparse.Namespace = parser.parse_args()
     REQUEST_TIMEOUT_SECONDS = args.timeout
 
-    output_dir: Path = Path(args.output) if args.output else Path(__file__).parent / ".yandex"
+    output_dir: Path = Path(args.output) if args.output else Path(__file__).parent / ".yande"
     output_dir.mkdir(parents=True, exist_ok=True)
     session: requests.Session = build_session()
 

@@ -8,5 +8,6 @@ pymupdf-stubs==1.26.7
 
 # scraper
 requests
+playwright
 BeautifulSoup4
 types-beautifulsoup4
