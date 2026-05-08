@@ -1,11 +1,9 @@
-#pyright: standard
-import _pre_init
+# pyright: standard
 import argparse
 import os
 import shutil
 import subprocess
 from pathlib import Path
-
 
 REQUEST_TIMEOUT_SECONDS = 30
 
@@ -21,7 +19,7 @@ class CliArgs(argparse.Namespace):
 def resolve_node_path() -> str:
     candidates = [
         os.environ.get("PLAYWRIGHT_NODE_PATH"),
-        str(Path.home() / ".cache" / "codex-runtimes" / "codex-primary-runtime" / "dependencies" / "node" / "bin" / "node.exe"),
+        str(Path.home() / ".cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node.exe"),
         shutil.which("node"),
     ]
 
@@ -36,7 +34,7 @@ def resolve_playwright_package_dir() -> Path:
     env_node_modules = os.environ.get("PLAYWRIGHT_NODE_MODULES")
     candidates = [
         Path(env_node_modules) / "playwright" if env_node_modules else None,
-        Path.home() / ".cache" / "codex-runtimes" / "codex-primary-runtime" / "dependencies" / "node" / "node_modules" / "playwright",
+        Path.home() / ".cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright",
         Path.cwd() / "node_modules" / "playwright",
     ]
 

@@ -1,5 +1,4 @@
-#pyright: standard
-import _pre_init
+# pyright: standard
 import argparse
 import math
 import re
@@ -11,7 +10,6 @@ import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 from utils import build_session, download_url_to_directory, fetch_html, get_tag_attr, normalize_url
-
 
 REQUEST_DELAY_SECONDS = 1.0
 REQUEST_TIMEOUT_SECONDS = 30

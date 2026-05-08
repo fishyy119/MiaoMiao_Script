@@ -1,5 +1,4 @@
-#pyright: standard
-import _pre_init
+# pyright: standard
 import argparse
 from pathlib import Path
 from typing import List
@@ -10,7 +9,6 @@ from bs4 import BeautifulSoup
 from rich import print
 from tqdm import tqdm
 from utils import build_session, download_url_to_directory, fetch_html, get_tag_attr
-
 
 REQUEST_TIMEOUT_SECONDS = 15
 
@@ -67,7 +65,7 @@ def process_page(session: requests.Session, base_url: str, page: int, output_dir
     image_links: List[str] = parse_image_links(soup)
 
     for link in tqdm(image_links, desc="Downloading images", unit="image", leave=False):
-        try:            
+        try:
             download_url_to_directory(session, link, output_dir, timeout=REQUEST_TIMEOUT_SECONDS)
         except Exception as e:
             print(f"Failed to download {link}: {e}")
@@ -76,14 +74,14 @@ def process_page(session: requests.Session, base_url: str, page: int, output_dir
 def main() -> None:
     global REQUEST_TIMEOUT_SECONDS
 
-    parser: argparse.ArgumentParser = argparse.ArgumentParser(description="yande 图片抓取脚本")
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(description="yandere 图片抓取脚本")
     parser.add_argument("url", type=str, help="目标网页 URL")
-    parser.add_argument("-o", "--output", type=str, default=None, help="图片保存目录 (默认: .yande)")
+    parser.add_argument("-o", "--output", type=str, default=None, help="图片保存目录 (默认: .yandere)")
     parser.add_argument("--timeout", type=int, default=REQUEST_TIMEOUT_SECONDS, help="请求超时秒数 (默认: 15)")
     args: argparse.Namespace = parser.parse_args()
     REQUEST_TIMEOUT_SECONDS = args.timeout
 
-    output_dir: Path = Path(args.output) if args.output else Path(__file__).parent / ".yande"
+    output_dir: Path = Path(args.output) if args.output else Path(__file__).parent / ".yandere"
     output_dir.mkdir(parents=True, exist_ok=True)
     session: requests.Session = build_session()
 
