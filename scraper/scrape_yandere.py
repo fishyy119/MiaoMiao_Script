@@ -10,7 +10,18 @@ from rich import print
 from tqdm import tqdm
 from utils import build_session, download_url_to_directory, fetch_html, get_tag_attr
 
-REQUEST_TIMEOUT_SECONDS = 15
+REQUEST_TIMEOUT_SECONDS = 30
+
+
+def build_page_url(base_url: str, page: int) -> str:
+    parsed = urlparse(base_url)
+    query_params = parse_qs(parsed.query)
+
+    # parse_qs 返回的值是列表，统一用列表保存
+    query_params["page"] = [str(page)]
+    new_query = urlencode(query_params, doseq=True)
+
+    return urlunparse(parsed._replace(query=new_query))
 
 
 def parse_image_links(soup: BeautifulSoup) -> List[str]:
@@ -27,7 +38,7 @@ def parse_image_links(soup: BeautifulSoup) -> List[str]:
 
 def parse_total_pages(soup: BeautifulSoup) -> int:
     """解析总页数"""
-    page_numbers: List[int] = []
+    page_numbers: List[int] = [parse_current_page(soup)]
     for a_tag in soup.find_all("a"):
         aria_label = get_tag_attr(a_tag, "aria-label") or ""
         if aria_label.startswith("Page "):
@@ -51,15 +62,7 @@ def parse_current_page(soup: BeautifulSoup) -> int:
 
 
 def process_page(session: requests.Session, base_url: str, page: int, output_dir: Path) -> None:
-    parsed = urlparse(base_url)
-    query_params = parse_qs(parsed.query)
-
-    # parse_qs 返回的值是列表，统一用列表保存
-    query_params["page"] = [str(page)]
-    new_query = urlencode(query_params, doseq=True)
-
-    # 构建新 URL
-    new_url = urlunparse(parsed._replace(query=new_query))
+    new_url = build_page_url(base_url, page)
     html: str = fetch_html(session, new_url, timeout=REQUEST_TIMEOUT_SECONDS)
     soup: BeautifulSoup = BeautifulSoup(html, "html.parser")
     image_links: List[str] = parse_image_links(soup)
@@ -84,9 +87,10 @@ def main() -> None:
     output_dir: Path = Path(args.output) if args.output else Path(__file__).parent / ".yandere"
     output_dir.mkdir(parents=True, exist_ok=True)
     session: requests.Session = build_session()
+    first_page_url = build_page_url(args.url, 1)
 
-    print(f"Fetching HTML from {args.url}...")
-    html: str = fetch_html(session, args.url, timeout=REQUEST_TIMEOUT_SECONDS)
+    print(f"Fetching HTML from {first_page_url}...")
+    html: str = fetch_html(session, first_page_url, timeout=REQUEST_TIMEOUT_SECONDS)
     soup: BeautifulSoup = BeautifulSoup(html, "html.parser")
 
     total_page_count = parse_total_pages(soup)
@@ -94,7 +98,7 @@ def main() -> None:
 
     for page in tqdm(range(1, total_page_count + 1), desc="Processing pages", unit="page"):
         try:
-            process_page(session, args.url, page, output_dir)
+            process_page(session, first_page_url, page, output_dir)
         except Exception as e:
             print(f"Failed to process page {page}: {e}")
 
