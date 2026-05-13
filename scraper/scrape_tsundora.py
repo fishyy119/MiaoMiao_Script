@@ -2,22 +2,26 @@
 import argparse
 import math
 import re
+import sys
 import time
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup
+from rich.console import Console
 from tqdm import tqdm
 from utils import build_session, download_url_to_directory, fetch_html, get_tag_attr, normalize_url
 
 REQUEST_DELAY_SECONDS = 1.0
 REQUEST_TIMEOUT_SECONDS = 30
 PAGE_PATH_RE = re.compile(r"/page/\d+/?$")
+console = Console(file=sys.stderr)
 
 
 def log(message: str) -> None:
-    tqdm.write(message)
+    with tqdm.external_write_mode(file=sys.stderr):
+        console.print(message)
 
 
 class CliArgs(argparse.Namespace):
@@ -166,7 +170,7 @@ def process_page(
                 timeout=REQUEST_TIMEOUT_SECONDS,
             )
         except Exception as exc:
-            progress.write(f"Failed to process {post_url}: {exc}")
+            log(f"[red]Failed to process[/red] {post_url}: {exc}")
 
         time.sleep(REQUEST_DELAY_SECONDS)
 
@@ -175,11 +179,11 @@ def crawl_listing(start_url: str, output_dir: Path) -> None:
     session = build_session()
     first_page_url = build_first_page_url(start_url)
 
-    log(f"Fetching first page: {first_page_url}")
+    log(f"[cyan]Fetching first page:[/cyan] {first_page_url}")
     first_page_html = fetch_html(session, first_page_url, timeout=REQUEST_TIMEOUT_SECONDS)
     first_page_soup = BeautifulSoup(first_page_html, "html.parser")
     total_pages = parse_total_pages(first_page_soup)
-    log(f"Total pages: {total_pages}")
+    log(f"[green]Total pages:[/green] {total_pages}")
 
     outer_progress = tqdm(range(1, total_pages + 1), desc="Processing pages", unit="page", position=0)
     for page_number in outer_progress:

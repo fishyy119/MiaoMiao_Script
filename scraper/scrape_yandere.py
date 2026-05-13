@@ -1,16 +1,23 @@
 # pyright: standard
 import argparse
+import sys
 from pathlib import Path
 from typing import List
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import requests
 from bs4 import BeautifulSoup
-from rich import print
+from rich.console import Console
 from tqdm import tqdm
 from utils import build_session, download_url_to_directory, fetch_html, get_tag_attr
 
 REQUEST_TIMEOUT_SECONDS = 30
+console = Console(file=sys.stderr)
+
+
+def log(message: str) -> None:
+    with tqdm.external_write_mode(file=sys.stderr):
+        console.print(message)
 
 
 def build_page_url(base_url: str, page: int) -> str:
@@ -71,7 +78,7 @@ def process_page(session: requests.Session, base_url: str, page: int, output_dir
         try:
             download_url_to_directory(session, link, output_dir, timeout=REQUEST_TIMEOUT_SECONDS)
         except Exception as e:
-            print(f"Failed to download {link}: {e}")
+            log(f"[red]Failed to download[/red] {link}: {e}")
 
 
 def main() -> None:
@@ -89,18 +96,18 @@ def main() -> None:
     session: requests.Session = build_session()
     first_page_url = build_page_url(args.url, 1)
 
-    print(f"Fetching HTML from {first_page_url}...")
+    log(f"[cyan]Fetching HTML from[/cyan] {first_page_url}...")
     html: str = fetch_html(session, first_page_url, timeout=REQUEST_TIMEOUT_SECONDS)
     soup: BeautifulSoup = BeautifulSoup(html, "html.parser")
 
     total_page_count = parse_total_pages(soup)
-    print(f"Total pages: {total_page_count}")
+    log(f"[green]Total pages:[/green] {total_page_count}")
 
     for page in tqdm(range(1, total_page_count + 1), desc="Processing pages", unit="page"):
         try:
             process_page(session, first_page_url, page, output_dir)
         except Exception as e:
-            print(f"Failed to process page {page}: {e}")
+            log(f"[red]Failed to process page[/red] {page}: {e}")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse, urlunparse
@@ -5,10 +6,11 @@ from urllib.parse import urljoin, urlparse, urlunparse
 import requests
 from bs4.element import Tag
 
-
 DEFAULT_USER_AGENT = "Mozilla/5.0"
 DEFAULT_HTML_TIMEOUT_SECONDS = 10
 DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 15
+MAX_FILENAME_LENGTH = 64
+FILENAME_HASH_LENGTH = 16
 
 
 def build_session(user_agent: str = DEFAULT_USER_AGENT) -> requests.Session:
@@ -28,11 +30,20 @@ def normalize_url(base_url: str, target_url: str) -> str:
     return urlunparse(parsed._replace(fragment=""))
 
 
-def get_filename_from_url(url: str) -> str:
+def get_filename_from_url(url: str, max_length: int = MAX_FILENAME_LENGTH) -> str:
     filename = Path(urlparse(url).path).name
     if not filename:
         raise RuntimeError(f"Invalid file URL: {url}")
-    return filename
+
+    if len(filename) <= max_length:
+        return filename
+
+    suffix = Path(filename).suffix
+    stem = Path(filename).stem
+    hash_suffix = hashlib.blake2s(url.encode("utf-8"), digest_size=FILENAME_HASH_LENGTH // 2).hexdigest()
+    max_stem_length = max_length - (1 + len(hash_suffix) + len(suffix))
+
+    return f"{stem[:max_stem_length]}-{hash_suffix}{suffix}"
 
 
 def fetch_html(
