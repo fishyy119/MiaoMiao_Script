@@ -1,3 +1,7 @@
+// @ts-check
+
+const { createHash } = require("node:crypto");
+const { createReadStream } = require("node:fs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const readline = require("node:readline");
@@ -8,7 +12,63 @@ const { createRequire } = require("node:module");
 const REQUEST_DELAY_MS = 500;
 const POSTS_PER_PAGE = 200;
 const PROGRESS_BAR_WIDTH = 20;
+/**
+ * @typedef {{
+ *   url: string,
+ *   output: string,
+ *   timeoutMs: number,
+ *   headless: boolean,
+ *   profileDir: string,
+ *   playwrightPackageDir: string,
+ * }} BrowserScriptArgs
+ */
 
+/**
+ * @typedef {{
+ *   url: string,
+ *   output: string,
+ *   timeoutMs: number,
+ *   headless: boolean,
+ * }} RuntimeConfig
+ */
+
+/**
+ * @typedef {{
+ *   totalPages: number,
+ *   totalPosts: number,
+ *   currentPageNumber: number,
+ *   processedPosts: number,
+ *   savedCount: number,
+ *   skippedCount: number,
+ *   failedCount: number,
+ * }} ProgressState
+ */
+
+/**
+ * @typedef {{
+ *   md5?: unknown,
+ * }} DanbooruMediaAssetLike
+ */
+
+/**
+ * @typedef {{
+ *   id?: unknown,
+ *   md5?: unknown,
+ *   media_asset?: DanbooruMediaAssetLike | null,
+ * }} DanbooruPostLike
+ */
+
+/** @type {ProgressState | null} */
+let progressState = null;
+/** @type {RuntimeConfig | null} */
+let runtimeConfig = null;
+/** @type {Set<string> | null} */
+let existingFileHashes = null;
+
+/**
+ * @param {string} value
+ * @returns {number}
+ */
 function parseTimeoutMs(value) {
   const timeoutSeconds = Number(value);
   if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 0) {
@@ -22,7 +82,12 @@ function parseTimeoutMs(value) {
   return timeoutSeconds * 1000;
 }
 
+/**
+ * @param {string[]} argv
+ * @returns {BrowserScriptArgs}
+ */
 function parseArgs(argv) {
+  /** @type {BrowserScriptArgs} */
   const args = {
     url: "",
     output: "",
@@ -61,8 +126,47 @@ function parseArgs(argv) {
   return args;
 }
 
-function buildApiQueryParams(baseUrl) {
-  const parsed = new URL(baseUrl);
+/**
+ * @returns {RuntimeConfig}
+ */
+function getRuntimeConfig() {
+  if (runtimeConfig === null) {
+    throw new Error("Runtime config has not been initialized.");
+  }
+
+  return runtimeConfig;
+}
+
+/**
+ * @returns {Set<string>}
+ */
+function getExistingFileHashes() {
+  if (existingFileHashes === null) {
+    throw new Error("Existing file hashes have not been initialized.");
+  }
+
+  return existingFileHashes;
+}
+
+/**
+ * @param {BrowserScriptArgs} args
+ * @returns {void}
+ */
+function initializeRuntimeConfig(args) {
+  runtimeConfig = {
+    url: args.url,
+    output: args.output,
+    timeoutMs: args.timeoutMs,
+    headless: args.headless,
+  };
+}
+
+/**
+ * @returns {URLSearchParams}
+ */
+function buildApiQueryParams() {
+  const { url } = getRuntimeConfig();
+  const parsed = new URL(url);
   const queryParams = new URLSearchParams(parsed.search);
   const cleaned = new URLSearchParams();
 
@@ -76,9 +180,15 @@ function buildApiQueryParams(baseUrl) {
   return cleaned;
 }
 
-function buildPostsApiUrl(baseUrl, page) {
-  const parsed = new URL(baseUrl);
-  const queryParams = buildApiQueryParams(baseUrl);
+/**
+ * @param {number} page
+ * @returns {string}
+ * API查询：baseurl/posts.json?tags=...&page=...&limit=...
+ */
+function buildPostsApiUrl(page) {
+  const { url } = getRuntimeConfig();
+  const parsed = new URL(url);
+  const queryParams = buildApiQueryParams();
   queryParams.delete("z");
   queryParams.set("page", String(page));
   queryParams.set("limit", String(POSTS_PER_PAGE));
@@ -88,9 +198,14 @@ function buildPostsApiUrl(baseUrl, page) {
   return parsed.toString();
 }
 
-function buildCountsApiUrl(baseUrl) {
-  const parsed = new URL(baseUrl);
-  const queryParams = buildApiQueryParams(baseUrl);
+/**
+ * @returns {string}
+ * API查询：baseurl/counts/posts.json?tags=...
+ */
+function buildCountsApiUrl() {
+  const { url } = getRuntimeConfig();
+  const parsed = new URL(url);
+  const queryParams = buildApiQueryParams();
   queryParams.delete("z");
   queryParams.delete("page");
   queryParams.delete("limit");
@@ -100,34 +215,185 @@ function buildCountsApiUrl(baseUrl) {
   return parsed.toString();
 }
 
-function parseImageUrl(baseUrl, post) {
+/**
+ * @param {unknown} post
+ * @returns {string | null}
+ */
+function getPostId(post) {
   if (!post || typeof post !== "object") {
     return null;
   }
 
-  for (const key of ["file_url", "large_file_url", "preview_file_url"]) {
-    const value = post[key];
-    if (typeof value === "string" && value.length > 0) {
-      return new URL(value, baseUrl).toString();
+  const postLike = /** @type {DanbooruPostLike} */ (post);
+  const postId = postLike.id;
+  if (typeof postId === "number") {
+    return String(postId);
+  }
+
+  if (typeof postId === "string" && /^\d+$/.test(postId)) {
+    return postId;
+  }
+
+  return null;
+}
+
+/**
+ * @param {unknown} post
+ * @returns {string | null}
+ */
+function getPostHash(post) {
+  if (!post || typeof post !== "object") {
+    return null;
+  }
+
+  const postLike = /** @type {DanbooruPostLike} */ (post);
+  const candidates = [postLike.md5, postLike.media_asset?.md5];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && /^[a-f0-9]{32}$/i.test(candidate)) {
+      return candidate.toLowerCase();
     }
   }
 
   return null;
 }
 
-function getFilenameFromUrl(url) {
-  const parsed = new URL(url);
+/**
+ * @param {string} postId
+ * @returns {string}
+ */
+function buildPostUrl(postId) {
+  const { url } = getRuntimeConfig();
+  return new URL(`/posts/${postId}`, url).toString();
+}
+
+/**
+ * @param {string} downloadUrl
+ * @param {string | null} downloadAttribute
+ * @returns {string}
+ */
+function resolveDownloadFilename(downloadUrl, downloadAttribute) {
+  if (typeof downloadAttribute === "string") {
+    const candidate = path.posix.basename(downloadAttribute.trim());
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  const parsed = new URL(downloadUrl);
   const filename = path.posix.basename(parsed.pathname);
   if (!filename) {
-    throw new Error(`Invalid image URL: ${url}`);
+    throw new Error(`Invalid file URL: ${downloadUrl}`);
   }
   return filename;
 }
 
+/**
+ * @param {string} filename
+ * @returns {string | null}
+ */
+function extractEmbeddedHash(filename) {
+  const stem = path.parse(filename).name;
+  const separatorIndex = stem.lastIndexOf(" - ");
+  if (separatorIndex < 0) {
+    return null;
+  }
+
+  const candidate = stem.slice(separatorIndex + 3).trim();
+  if (!/^[a-f0-9]{32}$/i.test(candidate)) {
+    return null;
+  }
+
+  return candidate.toLowerCase();
+}
+
+/**
+ * @param {string} outputDir
+ * @returns {Promise<void>}
+ */
+async function initializeExistingFileHashes(outputDir) {
+  const hashes = new Set();
+  const entries = await fs.readdir(outputDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const filePath = path.join(outputDir, entry.name);
+    const hash = extractEmbeddedHash(entry.name) ?? (await calculateFileMd5(filePath));
+    if (hash) {
+      hashes.add(hash);
+    }
+  }
+
+  existingFileHashes = hashes;
+}
+
+/**
+ * @param {string} filePath
+ * @returns {Promise<void>}
+ */
+async function rememberExistingFileHashes(filePath) {
+  const hashes = getExistingFileHashes();
+  const hash = extractEmbeddedHash(path.basename(filePath)) ?? (await calculateFileMd5(filePath));
+  if (hash) {
+    hashes.add(hash);
+  }
+}
+
+/**
+ * @param {string} filePath
+ * @returns {Promise<string | null>}
+ */
+async function calculateFileMd5(filePath) {
+  return await new Promise((resolve, reject) => {
+    const hasher = createHash("md5");
+    const stream = createReadStream(filePath);
+
+    stream.on("error", reject);
+    stream.on("data", (chunk) => {
+      hasher.update(chunk);
+    });
+    stream.on("end", () => {
+      resolve(hasher.digest("hex"));
+    });
+  });
+}
+
+/**
+ * @param {number} ms
+ * @returns {Promise<void>}
+ */
 async function delay(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * @param {string} targetPath
+ * @returns {Promise<boolean>}
+ */
+async function fileExists(targetPath) {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @param {unknown} error
+ * @returns {string}
+ */
+function getErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * @param {import("playwright").Page} page
+ * @returns {Promise<boolean>}
+ */
 async function isChallengePage(page) {
   const title = await page.title();
   if (title.includes("Just a moment")) {
@@ -138,7 +404,12 @@ async function isChallengePage(page) {
   return bodyText.includes("Enable JavaScript and cookies to continue");
 }
 
-async function waitForChallengeClear(page, headless) {
+/**
+ * @param {import("playwright").Page} page
+ * @returns {Promise<void>}
+ */
+async function waitForChallengeClear(page) {
+  const { headless } = getRuntimeConfig();
   if (!(await isChallengePage(page))) {
     return;
   }
@@ -161,6 +432,11 @@ async function waitForChallengeClear(page, headless) {
   }
 }
 
+/**
+ * @param {number} current
+ * @param {number} total
+ * @returns {string}
+ */
 function formatProgressBar(current, total) {
   const safeTotal = Math.max(total, 1);
   const clampedCurrent = Math.min(Math.max(current, 0), safeTotal);
@@ -168,6 +444,9 @@ function formatProgressBar(current, total) {
   return `${clampedCurrent}/${safeTotal} [${"=".repeat(filledWidth)}${"-".repeat(PROGRESS_BAR_WIDTH - filledWidth)}]`;
 }
 
+/**
+ * @returns {void}
+ */
 function clearProgressLine() {
   if (!stdout.isTTY) {
     return;
@@ -177,18 +456,31 @@ function clearProgressLine() {
   readline.clearLine(stdout, 0);
 }
 
-function renderProgress(progressState) {
+/**
+ * @returns {ProgressState}
+ */
+function getProgressState() {
+  if (progressState === null) {
+    throw new Error("Progress state has not been initialized.");
+  }
+
+  return progressState;
+}
+
+/**
+ * @returns {void}
+ */
+function renderProgress() {
   if (!stdout.isTTY) {
     return;
   }
 
+  const progressState = getProgressState();
   const pageText = formatProgressBar(progressState.currentPageNumber, progressState.totalPages);
   const postText = formatProgressBar(progressState.processedPosts, progressState.totalPosts);
-  const currentPagePost = `${Math.min(progressState.currentPagePostIndex, progressState.currentPagePosts)}/${Math.max(progressState.currentPagePosts, 1)}`;
   const message = [
     `Pages ${pageText}`,
     `Posts ${postText}`,
-    `Current ${currentPagePost}`,
     `saved ${progressState.savedCount}`,
     `skipped ${progressState.skippedCount}`,
     `failed ${progressState.failedCount}`,
@@ -198,7 +490,11 @@ function renderProgress(progressState) {
   stdout.write(message);
 }
 
-function logProgressMessage(message, progressState = null) {
+/**
+ * @param {string} message
+ * @returns {void}
+ */
+function logProgressMessage(message) {
   if (!stdout.isTTY) {
     console.log(message);
     return;
@@ -206,21 +502,30 @@ function logProgressMessage(message, progressState = null) {
 
   clearProgressLine();
   console.log(message);
-  if (progressState) {
-    renderProgress(progressState);
+  if (progressState !== null) {
+    renderProgress();
   }
 }
 
-function finishProgress(progressState) {
+/**
+ * @returns {void}
+ */
+function finishProgress() {
   if (!stdout.isTTY) {
     return;
   }
 
-  renderProgress(progressState);
+  renderProgress();
   stdout.write("\n");
 }
 
-async function fetchJsonInPage(page, targetUrl, timeoutMs) {
+/**
+ * @param {import("playwright").Page} page
+ * @param {string} targetUrl
+ * @returns {Promise<any>}
+ */
+async function fetchJsonInPage(page, targetUrl) {
+  const { timeoutMs } = getRuntimeConfig();
   const result = await page.evaluate(async ({ url, timeoutMs: requestTimeoutMs }) => {
     const controller = new AbortController();
     const timer = requestTimeoutMs > 0 ? setTimeout(() => controller.abort(), requestTimeoutMs) : null;
@@ -238,7 +543,7 @@ async function fetchJsonInPage(page, targetUrl, timeoutMs) {
         fetchError: "",
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = getErrorMessage(error);
       return {
         ok: false,
         status: 0,
@@ -277,6 +582,10 @@ async function fetchJsonInPage(page, targetUrl, timeoutMs) {
   }
 }
 
+/**
+ * @param {any} payload
+ * @returns {number}
+ */
 function parseTotalPosts(payload) {
   if (typeof payload === "number") {
     return payload;
@@ -303,20 +612,31 @@ function parseTotalPosts(payload) {
   throw new Error(`Failed to parse total posts from counts payload: ${JSON.stringify(payload)}`);
 }
 
-async function fetchPosts(page, baseUrl, pageNumber, timeoutMs) {
-  const url = buildPostsApiUrl(baseUrl, pageNumber);
-  const payload = await fetchJsonInPage(page, url, timeoutMs);
+/**
+ * @param {import("playwright").Page} page
+ * @param {number} pageNumber
+ * @returns {Promise<any[]>}
+ * 获取各post详细信息，分页查询
+ */
+async function fetchPosts(page, pageNumber) {
+  const url = buildPostsApiUrl(pageNumber);
+  const payload = await fetchJsonInPage(page, url);
   if (!Array.isArray(payload)) {
     throw new Error(`Unexpected posts payload type for ${url}`);
   }
   return payload;
 }
 
-async function prefetchPostsPages(page, baseUrl, timeoutMs) {
+/**
+ * @param {import("playwright").Page} page
+ * @returns {Promise<any[][]>}
+ * 获取post的详细信息
+ */
+async function prefetchPostsPages(page) {
   const pages = [];
   for (let pageNumber = 1; ; pageNumber += 1) {
     console.log(`Prefetching page ${pageNumber} to determine total pages...`);
-    const posts = await fetchPosts(page, baseUrl, pageNumber, timeoutMs);
+    const posts = await fetchPosts(page, pageNumber);
     if (posts.length === 0) {
       break;
     }
@@ -329,18 +649,24 @@ async function prefetchPostsPages(page, baseUrl, timeoutMs) {
   return pages;
 }
 
-async function fetchTotalPages(page, baseUrl, timeoutMs) {
-  const countsUrl = buildCountsApiUrl(baseUrl);
+/**
+ * @param {import("playwright").Page} page
+ * @returns {Promise<{ totalPages: number, totalPosts: number, cachedPages: any[][] | null }>}
+ * 返回任务总览（总数、各post信息）
+ */
+async function fetchTotalPages(page) {
+  const countsUrl = buildCountsApiUrl();
 
   try {
-    const payload = await fetchJsonInPage(page, countsUrl, timeoutMs);
+    const payload = await fetchJsonInPage(page, countsUrl);
     const totalPosts = parseTotalPosts(payload);
     console.log(`Total posts: ${totalPosts}`);
     return { totalPages: Math.max(Math.ceil(totalPosts / POSTS_PER_PAGE), 1), totalPosts, cachedPages: null };
   } catch (error) {
-    if (String(error.message).includes("Cloudflare challenge")) {
+    const message = getErrorMessage(error);
+    if (message.includes("Cloudflare challenge")) {
       console.log(`Counts endpoint blocked, fallback to paging posts: ${countsUrl}`);
-      const cachedPages = await prefetchPostsPages(page, baseUrl, timeoutMs);
+      const cachedPages = await prefetchPostsPages(page);
       const totalPosts = cachedPages.reduce((sum, posts) => sum + posts.length, 0);
       console.log(`Total posts: ${totalPosts}`);
       return { totalPages: Math.max(cachedPages.length, 1), totalPosts, cachedPages };
@@ -349,31 +675,58 @@ async function fetchTotalPages(page, baseUrl, timeoutMs) {
   }
 }
 
-async function downloadImage(downloadPage, imageUrl, outputDir, timeoutMs) {
-  const outputPath = path.join(outputDir, getFilenameFromUrl(imageUrl));
+/**
+ * @param {import("playwright").Page} downloadPage
+ * @param {string} postUrl
+ * @returns {Promise<string>}
+ * 分析post页面，获取即将下载的文件名
+ */
+async function prepareDownload(downloadPage, postUrl) {
+  const { output, timeoutMs } = getRuntimeConfig();
+  await downloadPage.goto(postUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+  await waitForChallengeClear(downloadPage);
 
-  try {
-    await fs.access(outputPath);
-    return "skipped";
-  } catch {}
-
-  const response = await downloadPage.goto(imageUrl, { waitUntil: "domcontentloaded", timeout: timeoutMs });
-  if (!response || !response.ok()) {
-    throw new Error(`Failed to fetch image: ${imageUrl}`);
+  const downloadLink = downloadPage.getByRole("link", { name: /^Download$/ });
+  await downloadLink.waitFor({ state: "visible", timeout: timeoutMs });
+  const downloadHref = await downloadLink.getAttribute("href");
+  if (!downloadHref) {
+    throw new Error(`Download link missing href: ${postUrl}`);
   }
 
-  const buffer = await response.body();
-  await fs.writeFile(outputPath, buffer);
-  return "saved";
+  const downloadUrl = new URL(downloadHref, postUrl).toString();
+  const downloadAttribute = await downloadLink.getAttribute("download");
+  const outputPath = path.join(output, resolveDownloadFilename(downloadUrl, downloadAttribute));
+
+  return outputPath;
 }
 
+/**
+ * @param {import("playwright").Page} downloadPage
+ * @param {string} outputPath
+ * @returns {Promise<void>}
+ * 执行文件下载
+ */
+async function downloadPostAsset(downloadPage, outputPath) {
+  const { timeoutMs } = getRuntimeConfig();
+  const downloadLink = downloadPage.getByRole("link", { name: /^Download$/ });
+  const [download] = await Promise.all([
+    downloadPage.waitForEvent("download", { timeout: timeoutMs }),
+    downloadLink.click(),
+  ]);
+
+  await download.saveAs(outputPath);
+}
+
+/**
+ * @param {number} totalPages
+ * @param {number} totalPosts
+ * @returns {void}
+ */
 function createProgressState(totalPages, totalPosts) {
-  return {
+  progressState = {
     totalPages,
     totalPosts: Math.max(totalPosts, 1),
     currentPageNumber: 0,
-    currentPagePosts: 0,
-    currentPagePostIndex: 0,
     processedPosts: 0,
     savedCount: 0,
     skippedCount: 0,
@@ -381,86 +734,134 @@ function createProgressState(totalPages, totalPosts) {
   };
 }
 
-async function processPosts(downloadPage, baseUrl, posts, pageNumber, totalPages, outputDir, timeoutMs, seenUrls, progressState) {
+/**
+ * @param {import("playwright").Page} downloadPage
+ * @param {any[]} posts
+ * @param {number} pageNumber
+ * @param {Set<string>} seenPostIds
+ * @returns {Promise<void>}
+ */
+async function processPosts(downloadPage, posts, pageNumber, seenPostIds) {
+  const progressState = getProgressState();
+  const existingFileHashes = getExistingFileHashes();
   progressState.currentPageNumber = pageNumber;
-  progressState.currentPagePosts = posts.length;
-  progressState.currentPagePostIndex = 0;
 
   if (!stdout.isTTY) {
-    console.log(`[${pageNumber}/${totalPages}] posts: ${posts.length}`);
+    console.log(`[${pageNumber}/${progressState.totalPages}] posts: ${posts.length}`);
   } else {
-    renderProgress(progressState);
+    renderProgress();
   }
 
   for (let index = 0; index < posts.length; index += 1) {
-    progressState.currentPagePostIndex = index + 1;
-    const imageUrl = parseImageUrl(baseUrl, posts[index]);
-    if (!imageUrl) {
+    const post = posts[index];
+    const postId = getPostId(post);
+    if (!postId) {
       progressState.processedPosts += 1;
       progressState.skippedCount += 1;
-      renderProgress(progressState);
+      renderProgress();
       continue;
     }
 
-    if (seenUrls.has(imageUrl)) {
+    if (seenPostIds.has(postId)) {
       progressState.processedPosts += 1;
       progressState.skippedCount += 1;
-      renderProgress(progressState);
+      renderProgress();
       continue;
     }
 
-    seenUrls.add(imageUrl);
+    // 使用hash跳过已存在文件，hash由API获得，无需加载post页面
+    const postHash = getPostHash(post);
+    if (postHash && existingFileHashes.has(postHash)) {
+      progressState.processedPosts += 1;
+      progressState.skippedCount += 1;
+      renderProgress();
+      continue;
+    }
+
+    seenPostIds.add(postId);
+    const postUrl = buildPostUrl(postId);
+    let outputPath;
 
     try {
-      const result = await downloadImage(downloadPage, imageUrl, outputDir, timeoutMs);
-      progressState.processedPosts += 1;
-      if (result === "saved") {
-        progressState.savedCount += 1;
-      } else {
-        progressState.skippedCount += 1;
-      }
+      outputPath = await prepareDownload(downloadPage, postUrl);
     } catch (error) {
       progressState.processedPosts += 1;
       progressState.failedCount += 1;
-      logProgressMessage(`Failed page ${pageNumber} post ${index + 1}: ${error.message}`, progressState);
+      logProgressMessage(`Failed page ${pageNumber} post ${index + 1}: ${getErrorMessage(error)}`);
+      renderProgress();
+      await delay(REQUEST_DELAY_MS);
+      continue;
     }
 
-    renderProgress(progressState);
+    // 文件名存在跳过（虽然肯定会被前面的hash判断拦住，但还是兜一下底）
+    if (await fileExists(outputPath)) {
+      if (postHash) {
+        existingFileHashes.add(postHash);
+      }
+      await rememberExistingFileHashes(outputPath);
+      progressState.processedPosts += 1;
+      progressState.skippedCount += 1;
+      renderProgress();
+      continue;
+    }
+
+    try {
+      await downloadPostAsset(downloadPage, outputPath);
+      if (postHash) {
+        existingFileHashes.add(postHash);
+      }
+      await rememberExistingFileHashes(outputPath);
+      progressState.processedPosts += 1;
+      progressState.savedCount += 1;
+    } catch (error) {
+      progressState.processedPosts += 1;
+      progressState.failedCount += 1;
+      logProgressMessage(`Failed page ${pageNumber} post ${index + 1}: ${getErrorMessage(error)}`);
+    }
+
+    renderProgress();
     await delay(REQUEST_DELAY_MS);
   }
 }
 
+/**
+ * @returns {Promise<void>}
+ */
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  initializeRuntimeConfig(args);
   const requireFromPlaywright = createRequire(path.join(args.playwrightPackageDir, "package.json"));
   const { chromium } = requireFromPlaywright("playwright");
 
   await fs.mkdir(args.output, { recursive: true });
   await fs.mkdir(args.profileDir, { recursive: true });
+  const existingFileHashesPromise = initializeExistingFileHashes(args.output);
 
   const context = await chromium.launchPersistentContext(args.profileDir, {
     headless: args.headless,
     viewport: null,
+    acceptDownloads: true,
   });
 
   try {
     const page = context.pages()[0] ?? (await context.newPage());
     await page.goto(args.url, { waitUntil: "domcontentloaded", timeout: args.timeoutMs });
-    await waitForChallengeClear(page, args.headless);
+    await waitForChallengeClear(page);
 
-    const { totalPages, totalPosts, cachedPages } = await fetchTotalPages(page, args.url, args.timeoutMs);
+    const { totalPages, totalPosts, cachedPages } = await fetchTotalPages(page);
     console.log(`Total pages: ${totalPages}`);
 
     const downloadPage = await context.newPage();
-    const seenUrls = new Set();
-    const progressState = createProgressState(totalPages, totalPosts);
+    const seenPostIds = new Set();
+    createProgressState(totalPages, totalPosts);
+    await existingFileHashesPromise;
 
     for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
-      const posts = cachedPages ? cachedPages[pageNumber - 1] : await fetchPosts(page, args.url, pageNumber, args.timeoutMs);
-      await processPosts(downloadPage, args.url, posts, pageNumber, totalPages, args.output, args.timeoutMs, seenUrls, progressState);
+      const posts = cachedPages ? cachedPages[pageNumber - 1] : await fetchPosts(page, pageNumber);
+      await processPosts(downloadPage, posts, pageNumber, seenPostIds);
     }
 
-    finishProgress(progressState);
+    finishProgress();
   } finally {
     await context.close();
   }
@@ -468,6 +869,6 @@ async function main() {
 
 main().catch((error) => {
   clearProgressLine();
-  console.error(error instanceof Error ? error.message : String(error));
+  console.error(getErrorMessage(error));
   process.exit(1);
 });

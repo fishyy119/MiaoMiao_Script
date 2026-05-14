@@ -1,5 +1,6 @@
 *.log
-*.jpg
-*.png
 
+
+# development
 __pycache__
+node_modules

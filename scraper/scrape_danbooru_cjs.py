@@ -48,9 +48,9 @@ def resolve_playwright_package_dir() -> Path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Danbooru 图片抓取脚本 (Playwright 浏览器版)")
+    parser = argparse.ArgumentParser(description="Danbooru 资源抓取脚本 (调用cjs脚本)")
     parser.add_argument("url", type=str, help="目标网页 URL")
-    parser.add_argument("-o", "--output", type=str, default=None, help="图片保存目录 (默认: .danbooru)")
+    parser.add_argument("-o", "--output", type=str, default=None, help="资源保存目录 (默认: .danbooru)")
     parser.add_argument(
         "--timeout",
         type=int,
@@ -96,6 +96,7 @@ def main() -> None:
     if args.headless:
         command.append("--headless")
 
+    print(f"Running browser script with command: {' '.join(command)}\n")
     subprocess.run(command, check=True)
 
 
