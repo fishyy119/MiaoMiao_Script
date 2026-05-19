@@ -14,6 +14,7 @@
 另外，远程分支中以 `archive` 开头的分支会被自动排除。
 """
 
+import base64
 import fnmatch
 import json
 import shutil
@@ -26,8 +27,9 @@ from enum import StrEnum
 from itertools import combinations
 from math import comb
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Self, Sequence, Set, Tuple
+from typing import Dict, List, Mapping, Optional, Self, Sequence, Set, Tuple, TypedDict
 
+from pydantic import TypeAdapter, ValidationError
 from rich.console import Console
 from rich.table import Table
 from tqdm import tqdm
@@ -103,11 +105,24 @@ class PairStatus(StrEnum):
         return cls.CLEAN
 
 
+class PairCacheEntryPayload(TypedDict):
+    pair_status: PairStatus
+    first_then_second_status: SequenceStatus
+    first_then_second_conflict_files: List[str]
+    second_then_first_status: SequenceStatus
+    second_then_first_conflict_files: List[str]
+
+
+AnalysisCachePayload = Dict[str, PairCacheEntryPayload]
+ANALYSIS_CACHE_PAYLOAD_ADAPTER = TypeAdapter(AnalysisCachePayload)
+
+
 console = Console()
 
 
 @dataclass(frozen=True)
 class Args:
+    repo_arg: str
     repo: Path
     main_branch: Optional[str]
     branch_patterns: List[str]
@@ -117,7 +132,11 @@ class Args:
 
     @classmethod
     def from_ns(cls, ns: Namespace) -> "Args":
-        repo = Path(str(ns.repo)).expanduser().resolve()
+        repo_arg = str(ns.repo).strip()
+        if not repo_arg:
+            raise ValueError("仓库路径不能为空")
+
+        repo = Path(repo_arg).expanduser().resolve()
         if not repo.exists():
             raise ValueError(f"仓库路径不存在: {repo}")
         if not repo.is_dir():
@@ -135,6 +154,7 @@ class Args:
             raise ValueError(f"临时目录不是文件夹: {temp_root}")
 
         return cls(
+            repo_arg=repo_arg,
             repo=repo,
             main_branch=main_branch,
             branch_patterns=branch_patterns,
@@ -162,6 +182,11 @@ class Args:
 
         return patterns
 
+    @property
+    def cache_file(self) -> Path:
+        repo_arg_base64 = base64.urlsafe_b64encode(self.repo_arg.encode("utf-8")).decode("ascii")
+        return self.temp_root / f"check_cache_{repo_arg_base64}.json"
+
 
 def parse_args() -> Args:
     parser = ArgumentParser(description="预测多个分支按不同顺序合回主分支时，是否会产生人工冲突。")
@@ -170,7 +195,10 @@ def parse_args() -> Args:
     parser.add_argument("--branch", action="append", help="分支名或通配模式，可重复传入，例如 --branch 'feat/*'")
     parser.add_argument("--conflicts-only", action="store_true", help="只输出存在风险或已经冲突的分支对")
     parser.add_argument("--json", action="store_true", help="输出机器可读的 JSON 结果")
-    parser.add_argument("--temp-root", help="临时实验仓库的根目录，默认使用脚本目录下的 .tmp")
+    parser.add_argument(
+        "--temp-root",
+        help="临时实验仓库的根目录，默认使用脚本目录下的 .tmp；缓存文件也会放在这里",
+    )
 
     namespace = parser.parse_args()
     try:
@@ -218,6 +246,129 @@ class SequenceResult:
     @classmethod
     def conflict(cls, conflict_files: Sequence[str]) -> Self:
         return cls(status=SequenceStatus.CONFLICT, conflict_files=tuple(conflict_files))
+
+
+class AnalysisCache:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._pair_results: Dict[str, PairCacheEntryPayload] = {}
+        self._dirty = False
+
+    @classmethod
+    def load(cls, path: Path) -> "AnalysisCache":
+        cache = cls(path)
+        if not path.exists():
+            return cache
+
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            validated_payload = ANALYSIS_CACHE_PAYLOAD_ADAPTER.validate_python(payload)
+        except (OSError, json.JSONDecodeError, ValidationError):
+            return cache
+
+        cache._pair_results = validated_payload
+        return cache
+
+    @staticmethod
+    def _pair_key(main_commit: str, first_tip: str, second_tip: str) -> str:
+        ordered_tips = sorted((first_tip, second_tip))
+        return ":".join((main_commit, ordered_tips[0], ordered_tips[1]))
+
+    @staticmethod
+    def _pair_result_from_payload(
+        payload: PairCacheEntryPayload,
+        branch_a: BranchInfo,
+        branch_b: BranchInfo,
+    ) -> "PairResult":
+        if branch_a.tip <= branch_b.tip:
+            a_then_b_status = payload["first_then_second_status"]
+            a_then_b_conflict_files = payload["first_then_second_conflict_files"]
+            b_then_a_status = payload["second_then_first_status"]
+            b_then_a_conflict_files = payload["second_then_first_conflict_files"]
+        else:
+            a_then_b_status = payload["second_then_first_status"]
+            a_then_b_conflict_files = payload["second_then_first_conflict_files"]
+            b_then_a_status = payload["first_then_second_status"]
+            b_then_a_conflict_files = payload["first_then_second_conflict_files"]
+
+        return PairResult(
+            branch_a=branch_a.name,
+            branch_b=branch_b.name,
+            pair_status=payload["pair_status"],
+            a_then_b_status=a_then_b_status,
+            a_then_b_conflict_files=list(a_then_b_conflict_files),
+            b_then_a_status=b_then_a_status,
+            b_then_a_conflict_files=list(b_then_a_conflict_files),
+        )
+
+    @staticmethod
+    def _payload_from_pair_result(
+        branch_a: BranchInfo,
+        branch_b: BranchInfo,
+        result: "PairResult",
+    ) -> PairCacheEntryPayload:
+        if branch_a.tip <= branch_b.tip:
+            first_then_second_status = result.a_then_b_status
+            first_then_second_conflict_files = result.a_then_b_conflict_files
+            second_then_first_status = result.b_then_a_status
+            second_then_first_conflict_files = result.b_then_a_conflict_files
+        else:
+            first_then_second_status = result.b_then_a_status
+            first_then_second_conflict_files = result.b_then_a_conflict_files
+            second_then_first_status = result.a_then_b_status
+            second_then_first_conflict_files = result.a_then_b_conflict_files
+
+        return {
+            "pair_status": result.pair_status,
+            "first_then_second_status": first_then_second_status,
+            "first_then_second_conflict_files": list(first_then_second_conflict_files),
+            "second_then_first_status": second_then_first_status,
+            "second_then_first_conflict_files": list(second_then_first_conflict_files),
+        }
+
+    def get_pair_result(
+        self,
+        main_commit: str,
+        branch_a: BranchInfo,
+        branch_b: BranchInfo,
+    ) -> Optional["PairResult"]:
+        payload = self._pair_results.get(self._pair_key(main_commit, branch_a.tip, branch_b.tip))
+        if payload is None:
+            return None
+        return self._pair_result_from_payload(payload, branch_a, branch_b)
+
+    def store_pair_result(
+        self,
+        main_commit: str,
+        branch_a: BranchInfo,
+        branch_b: BranchInfo,
+        result: "PairResult",
+    ) -> None:
+        cache_key = self._pair_key(main_commit, branch_a.tip, branch_b.tip)
+        payload = self._payload_from_pair_result(branch_a, branch_b, result)
+        if self._pair_results.get(cache_key) == payload:
+            return
+
+        self._pair_results[cache_key] = payload
+        self._dirty = True
+
+    def save(self) -> None:
+        if not self._dirty:
+            return
+
+        payload: AnalysisCachePayload = {
+            pair_key: entry_payload for pair_key, entry_payload in sorted(self._pair_results.items())
+        }
+        serializable_payload = ANALYSIS_CACHE_PAYLOAD_ADAPTER.dump_python(payload, mode="json")
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = self.path.with_suffix(self.path.suffix + ".tmp")
+        temp_path.write_text(
+            json.dumps(serializable_payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temp_path.replace(self.path)
+        self._dirty = False
 
 
 @dataclass(frozen=True)
@@ -584,6 +735,7 @@ def analyse_repo(
     main_branch: str,
     branches: Sequence[BranchInfo],
     temp_root: Path,
+    cache: AnalysisCache,
 ) -> AnalysisReport:
     main_commit = run_git(source_repo, "rev-parse", f"{main_branch}^{{commit}}").stdout.strip()
     source_git_dir = Path(run_git(source_repo, "rev-parse", "--absolute-git-dir").stdout.strip())
@@ -595,7 +747,7 @@ def analyse_repo(
     try:
 
         def get_prepared_merge(branch: BranchInfo) -> PreparedMerge:
-            cached = prepared_merges.get(branch.name)
+            cached = prepared_merges.get(branch.tip)
             if cached is not None:
                 return cached
 
@@ -605,7 +757,7 @@ def analyse_repo(
                 main_commit=main_commit,
                 branch=branch,
             )
-            prepared_merges[branch.name] = prepared
+            prepared_merges[branch.tip] = prepared
             return prepared
 
         with tqdm(
@@ -616,6 +768,17 @@ def analyse_repo(
             leave=True,
         ) as progress:
             for branch_a, branch_b in combinations(branches, 2):
+                cached_pair = cache.get_pair_result(
+                    main_commit=main_commit,
+                    branch_a=branch_a,
+                    branch_b=branch_b,
+                )
+                if cached_pair is not None:
+                    pair_results.append(cached_pair)
+                    progress.set_postfix_str(f"cache {branch_a.name} + {branch_b.name}")
+                    progress.update(2)
+                    continue
+
                 result_a = get_prepared_merge(branch_a)
                 result_b = get_prepared_merge(branch_b)
 
@@ -627,9 +790,17 @@ def analyse_repo(
                 sequence_ba = result_b.analyse_followup(lab, branch_a)
                 progress.update(1)
 
-                pair_results.append(PairResult.from_sequences(branch_a, branch_b, sequence_ab, sequence_ba))
+                pair_result = PairResult.from_sequences(branch_a, branch_b, sequence_ab, sequence_ba)
+                cache.store_pair_result(
+                    main_commit=main_commit,
+                    branch_a=branch_a,
+                    branch_b=branch_b,
+                    result=pair_result,
+                )
+                pair_results.append(pair_result)
     finally:
         lab.close()
+        cache.save()
 
     return AnalysisReport.create(
         main_branch=main_branch,
@@ -692,7 +863,14 @@ def main() -> int:
             raise RuntimeError("过滤后至少需要 2 个候选分支")
 
         branch_info = BranchInfo.resolve_many(repo, branches)
-        report = analyse_repo(repo, main_branch, branch_info, temp_root=args.temp_root)
+        cache = AnalysisCache.load(args.cache_file)
+        report = analyse_repo(
+            repo,
+            main_branch,
+            branch_info,
+            temp_root=args.temp_root,
+            cache=cache,
+        )
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

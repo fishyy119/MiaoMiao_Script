@@ -1,6 +1,7 @@
 # Python 3.12.7
 tqdm==4.67.1
 rich
+pydantic~=2.1
 
 # pdf
 PyMuPDF==1.26.7
